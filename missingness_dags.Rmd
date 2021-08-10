@@ -1,0 +1,52 @@
+---
+title: Missingness DAGs
+author: John C. Flournoy
+date: "`r Sys.Date()`"
+---
+
+The key is to ensure that the missing-data node (_R) is not connected to the outcome node. Below, this means that SST_BOLD should be d-separated from SST_BOLD_R. Note that we exclude data because we believe it to be erroneous. We don't want erroneous data included in our contrasts. However, the cause of exclusion (that is, the cause of missingess) may end up biasing our contrasts if we do not account for it. The diagram below assumes that we have successfully elimated the influence of the nuisance signal caused by motion on our outcome of interest.
+
+```{r}
+set.seed(1212)
+library(ggdag)
+sst <- dagify(SST_BOLD ~ IC,
+              Artifact ~ Motion,
+              SST_BOLD_R ~ Artifact + EarlyStop,
+              Motion ~ IC,
+              EarlyStop ~ IC,
+              exposure = 'SST_BOLD',
+              outcome = 'SST_BOLD_R') %>%
+  tidy_dagitty() %>%
+  dplyr::mutate(missing = dplyr::case_when(grepl('_R$', name) ~ 'missing',
+                                           name == 'SST_BOLD' ~ 'outcome', 
+                                           TRUE ~  'observed'),
+                control = dplyr::case_when(grepl('IC$', name) ~ 'control',
+                                           TRUE ~  ''),
+                path_color_ctrld = dplyr::case_when(name == 'IC' & to == 'SST_BOLD' ~ 'red',
+                                                    TRUE ~ 'darkgray'))
+
+ggplot(sst, aes(x = x, y = y, xend = xend, yend = yend)) +
+  geom_dag_node(aes(fill = missing, shape = control)) +
+  geom_dag_edges(edge_colour = 'red') +
+  geom_dag_text(color = 'black') +
+  scale_fill_manual(breaks = c('missing', 'observed', 'outcome'), values = c('red', 'lightblue', 'white')) + 
+  scale_shape_manual(breaks = c('controlled', ''), values = c(21, 21)) + 
+  theme_dag() +
+  theme(legend.position = 'none')
+
+```
+
+We see in the above that SST_BOLD and SST_BOLD_R are connected via two paths, both of which go through inhibitory control. Lucky for us, we have other measures of inhibitory control we can use to block this path:
+
+```{r}
+ggplot(sst, aes(x = x, y = y, xend = xend, yend = yend)) +
+  geom_dag_node(aes(fill = missing, shape = control)) +
+  geom_dag_edges(aes(edge_colour = path_color_ctrld)) +
+  geom_dag_text(color = 'black') +
+  scale_fill_manual(breaks = c('missing', 'observed'), values = c('gray', 'lightblue', 'white')) + 
+  scale_shape_manual(breaks = c('controlled', ''), values = c(21, 22)) + 
+  theme_dag() +
+  theme(legend.position = 'none')
+```
+
+Note we can't just use motion as a control variable, as there may be other reasons for exclusion that are related to inhibitory control but that are not purely motion. Stopping the scan early is just one example. Others may be refusal to follow the directions at some point in the scan (which would lead to exclusion because the behavioral data shows problems). All of these reasons raise the possibility that the data are not observed because of the value we _would_ have observed for SST nerual response had the participant not moved, stopped early, or complied with the task.
